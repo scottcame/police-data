@@ -1,0 +1,178 @@
+<!--
+  Mondrian schema for the police data dimensional database
+-->
+
+<Schema name='Police_Data' metamodelVersion='4.0'>
+
+	<PhysicalSchema>
+		<Table name="WeaponType"/>
+		<Table name="PremiseType"/>
+		<Table name="DateType"/>
+		<Table name="HourType"/>
+        <Table name="DistrictType"/>
+        <Table name="IncidentType"/>
+        <Table name="NeighborhoodType"/>
+        <Table name="Incident"/>
+	</PhysicalSchema>
+
+    <Dimension visible="true" name="Date" table="DateType" key="DateTypeID" type="TIME">
+        <Attributes>
+             <Attribute name="DateTypeID" keyColumn="DateTypeID" hasHierarchy="false"/>
+             <Attribute name="Year" keyColumn="YearLabel" hasHierarchy="false"/>
+             <Attribute name="Quarter" hasHierarchy="false" levelType="TimeQuarters">
+                <Key>
+                    <Column name="YearLabel"/>
+                    <Column name="CalendarQuarter"/>
+                </Key>
+                <Name>
+                    <Column name="CalendarQuarter"/>
+                </Name>
+            </Attribute>
+            <Attribute name="Month" hasHierarchy="false" levelType="TimeMonths">
+                <Key>
+                    <Column name="YearLabel"/>
+                    <Column name="CalendarQuarter"/>
+                    <Column name="Month"/>
+                </Key>
+                <Name>
+                    <Column name="Month"/>
+                </Name>
+            </Attribute>
+            <Attribute name="Day" hasHierarchy="false" levelType="TimeDays">
+                <Key>
+                    <Column name="YearLabel"/>
+                    <Column name="CalendarQuarter"/>
+                    <Column name="Month"/>
+                    <Column name="Day"/>
+                </Key>
+                <Name>
+                    <Column name="Day"/>
+                </Name>
+            </Attribute>
+            <Attribute name="Date" keyColumn="CalendarDate" hasHierarchy="false" levelType="TimeDays"/>            
+            <Attribute name="Day of Week" keyColumn="DayOfWeek" hasHierarchy="false" levelType="TimeDays"/>  
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name="DateYMD" caption="Year/Month/Day" allMemberName="All Years" allMemberCaption="All Years">
+                <Level attribute="Year" />
+                <Level attribute="Quarter" />
+                <Level attribute="Month" />
+                <Level attribute="Day" />
+            </Hierarchy>
+            <Hierarchy name="CalDate" caption="Calendar Date" allMemberName="All Dates" allMemberCaption="All Dates">
+                <Level attribute="Date"/>
+            </Hierarchy>
+            <Hierarchy name="Day of Week" caption="Day of Week" allMemberName="All Days" allMemberCaption="All Days">
+                <Level attribute="Day of Week"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+	
+    <Dimension name='Weapon' table='WeaponType' key='WeaponTypeID'>
+        <Attributes>
+            <Attribute name='WeaponTypeID' keyColumn='WeaponTypeID' hasHierarchy='false'/>
+            <Attribute name='WeaponTypeDescription' keyColumn='WeaponTypeDescription' hasHierarchy='false' caption="Weapon"/>
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name='WeaponTypeDescription' allMemberName='All Weapons' caption="Weapon">
+                <Level attribute='WeaponTypeDescription' caption="Weapon"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+    
+    <Dimension name='PremiseType' table='PremiseType' key='PremiseTypeID' caption="Type of Premise">
+        <Attributes>
+            <Attribute name='PremiseTypeID' keyColumn='PremiseTypeID' hasHierarchy='false'/>
+            <Attribute name='PremiseTypeDescription' keyColumn='PremiseTypeDescription' hasHierarchy='false' caption="Type of Premise"/>
+            <Attribute name='PremiseTypeCategory' keyColumn='PremiseTypeCategory' hasHierarchy='false' caption="Premise Category"/>
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name='PremiseTypeDescription' allMemberName='All Premise Types' caption="Type of Premise">
+                <Level attribute='PremiseTypeCategory' caption="Premise Category"/>
+                <Level attribute='PremiseTypeDescription' caption="Type of Premise"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+    
+    <Dimension name='Neighborhood' table='NeighborhoodType' key='NeighborhoodTypeID'>
+        <Attributes>
+            <Attribute name='NeighborhoodTypeID' keyColumn='NeighborhoodTypeID' hasHierarchy='false'/>
+            <Attribute name='NeighborhoodTypeDescription' keyColumn='NeighborhoodTypeDescription' hasHierarchy='false' caption="Neighborhood"/>
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name='NeighborhoodTypeDescription' allMemberName='All Neighborhoods' caption="Neighborhood">
+                <Level attribute='NeighborhoodTypeDescription' caption="Neighborhood"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+    
+    <Dimension name='District' table='DistrictType' key='DistrictTypeID'>
+        <Attributes>
+            <Attribute name='DistrictTypeID' keyColumn='DistrictTypeID' hasHierarchy='false'/>
+            <Attribute name='DistrictTypeDescription' keyColumn='DistrictTypeDescription' hasHierarchy='false' caption="District"/>
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name='DistrictTypeDescription' allMemberName='All Districts' caption="District">
+                <Level attribute='DistrictTypeDescription' caption="District"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+    
+    <Dimension name='IncidentType' table='IncidentType' key='IncidentTypeID' caption="Type of Incident">
+        <Attributes>
+            <Attribute name='IncidentTypeID' keyColumn='IncidentTypeID' hasHierarchy='false'/>
+            <Attribute name='IncidentTypeDescription' keyColumn='IncidentTypeDescription' hasHierarchy='false' caption="Type of Incident"/>
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name='IncidentTypeDescription' allMemberName='All Incident Types' caption="Type of Incident">
+                <Level attribute='IncidentTypeDescription' caption="Type of Incident"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+    
+	<Dimension name='HourType' table='HourType' key='HourTypeID' caption="Hour of Day">
+        <Attributes>
+            <Attribute name='HourTypeID' keyColumn='HourTypeID' hasHierarchy='false'/>
+            <Attribute name='HourTypeDescription' keyColumn='HourTypeDescription' hasHierarchy='false' orderByColumn="HourTypeID" caption="Hour of Day"/>
+            <Attribute name='HourTypeCategory' keyColumn='HourTypeCategory' hasHierarchy='false' orderByColumn="HourTypeCategorySort" caption="Part of Day"/>
+        </Attributes>
+        <Hierarchies>
+            <Hierarchy name='HourType' allMemberName='All' caption="Time of Day">
+                <Level attribute='HourTypeCategory' caption="Part of Day"/>
+                <Level attribute='HourTypeDescription' caption="Hour"/>
+            </Hierarchy>
+        </Hierarchies>
+    </Dimension>
+    
+    <Cube name="Police_Data">
+    
+    	<Dimensions>
+            <Dimension source="Weapon"/>
+            <Dimension source="PremiseType"/>
+            <Dimension source="Neighborhood"/>
+            <Dimension source="District"/>
+            <Dimension source="Date"/>
+            <Dimension source="HourType"/>
+    		<Dimension source="IncidentType"/>
+    	</Dimensions>
+    	
+    	<MeasureGroups>
+    		<MeasureGroup name="Police_Data" table="Incident">
+    			<Measures>
+    				<Measure name='Incident Count' column='IncidentID' aggregator='distinct-count'/>
+    			</Measures>
+    			<DimensionLinks>
+                    <ForeignKeyLink dimension='Weapon' foreignKeyColumn='WeaponTypeID'/>
+                    <ForeignKeyLink dimension='PremiseType' foreignKeyColumn='PremiseTypeID'/>
+                    <ForeignKeyLink dimension='District' foreignKeyColumn='DistrictTypeID'/>
+                    <ForeignKeyLink dimension='Neighborhood' foreignKeyColumn='NeighborhoodTypeID'/>
+                    <ForeignKeyLink dimension='IncidentType' foreignKeyColumn='IncidentTypeID'/>
+                    <ForeignKeyLink dimension='Date' foreignKeyColumn='DateTypeID'/>
+                    <ForeignKeyLink dimension='HourType' foreignKeyColumn='HourTypeID'/>
+                </DimensionLinks>
+    		</MeasureGroup>
+    	</MeasureGroups>
+    	
+    </Cube>
+
+</Schema>

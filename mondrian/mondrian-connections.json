@@ -1,0 +1,9 @@
+{
+	"police-data" : {
+		"JdbcDrivers" : "com.mysql.jdbc.Driver",
+		"Jdbc" : "jdbc:mysql://db-analytics-police-data/ojbc_analytics_police_data",
+		"Catalog" : "/PoliceDataMondrianSchema.xml",
+		"JdbcUser" : "analytics",
+		"Description" : "Police Data Cube"
+	}
+}

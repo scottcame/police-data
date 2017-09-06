@@ -1,0 +1,1 @@
+{"connectionname":"Police_Data","connectiontype":"MONDRIAN","jdbcurl":"jdbc:mysql://db-analytics-police-data/ojbc_analytics_police_data","schema":"/datasources/Police_Data.xml","driver":"com.mysql.jdbc.Driver","username":"analytics","password":"","security_type":null}
