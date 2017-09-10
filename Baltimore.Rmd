@@ -8,17 +8,18 @@ output:
 ---
 
 This notebook produces some simple visualizations of arrests in Baltimore from `r minDateS` through `r maxDateS`. These visualizations are mostly
-intended to support a talk I give on using open policing data.  Since the Baltimore Police Department (BPD)
+intended to support a presentation on using open policing data that I gave to a couple of audiences in the summer of 2017.  Since the Baltimore Police Department (BPD)
 [provides](https://data.baltimorecity.gov/Public-Safety/BPD-Part-1-Victim-Based-Crime-Data/wsfq-mvij) one of the best open datasets available,
-I chose it as the basis of the talk.
+I chose it as the basis of the talks.
 
-The slides for the talk (which also covers open data and use of open source software for analytics) are [here](https://docs.google.com/presentation/d/1bZx_G4dYhSViB6rwD9bdO22DO1VQNVFGnXrtzoSGQGk/edit?usp=sharing).
+The slides for the most recent talk (which also covers open data and use of open source software for analytics) are [here](https://docs.google.com/presentation/d/1bZx_G4dYhSViB6rwD9bdO22DO1VQNVFGnXrtzoSGQGk/edit?usp=sharing).
 
 It is not the intent of this notebook to draw any conclusions about the nature of crime in Baltimore, nor is it a goal to argue for or against
 any particular policing policy or strategy.  The intent is simply to show how to create interesting visualizations from open policing data
 (combined with contextual data from other sources, such as the American Community Survey).
 
-It's important to remember that counting (and analyzing) arrests made by law enforcement is not the same as counting crime that has occurred, nor
+One additional caveat:  it is important to remember that counting (and analyzing) arrests made by law enforcement is
+not the same as counting crime that has occurred, nor
 is it a measure of the degree to which crime impacts a neighborhood or city.  Two areas could be equally impacted by crime, but have different
 numbers of arrests due to a range of factors, including differences in law enforcement activity, different crime-fighting strategies,
 differences in the tendency of the inhabitants to report crimes to the police, and so on. Still, looking at arrests can provide interesting
@@ -44,6 +45,9 @@ Each record in the dataset contains:
 * What kind of weapon, if any, was involved
 * The type of area in which the incident occurred, and a separate indicator as to whether the incident occurred inside or outside
 
+For details on the transformations on the BPD dataset, as well as integration of the other data sources used in the notebook, see the
+[`Baltimore-ReadData.R` script](https://github.com/scottcame/police-data/blob/master/Baltimore-ReadData.R) in the GitHub repository.
+
 ```{r echo=FALSE, warning=FALSE}
 library(tidyverse, quietly=TRUE)
 library(ggplot2, quietly=TRUE)
@@ -59,7 +63,8 @@ if (!exists('Arrests')) {
 
 ## Distribution of Types of Crime
 
-Arrests for larceny and non-aggravated assault make up more than half of the records in the dataset:
+As an initial orientation to the dataset, I recoded the "description" field in the dataset slightly, and aggregated the records by the
+resulting crime types.  Arrests for larceny and non-aggravated assault make up more than half of the records in the dataset:
 
 ```{r}
 Arrests %>% group_by(Type) %>% summarize(n=n()) %>% mutate(pct=n/sum(n), pcts=percent(pct)) %>%
@@ -82,14 +87,15 @@ jurisdiction. In the next few sections, we will explore spatial visualization fr
 
 One of Baltimore's distinguishing features is [neighborhood identity](https://livebaltimore.com/neighborhoods/).
 Areas as small as a few city blocks are recognized by a specific
-name, with an official designation and definition by the city government.
+name, with an official designation and definition by the city government, and often a distinctive architectural style or other unique
+characteristics.
 
 The city provides a [shapefile](http://gis-baltimore.opendata.arcgis.com/datasets/1ca93e68f11541d4b59a63243725c4b7_0) with
 neighborhood boundaries and basic demographic information for each neighborhood. This allows us to create a neighborhood-level
 [choropleth](https://en.wikipedia.org/wiki/Choropleth_map) of arrests and arrests per capita. (Note that the arrest dataset from BPD
 truncates some of the neighborhood names, requiring a hardcoded adjustment of these values before merging with the shapefile.)
 
-```{r, fig.width=10}
+```{r, fig.width=11}
 TopCrimeNeighborhoods <- NeighborhoodDf %>%
   filter(!is.infinite(Arrests)) %>%
   arrange(desc(Arrests)) %>%
@@ -103,7 +109,7 @@ NeighborhoodSDF %>%
     geom_path(color='grey70') +
     geom_label(data=TopCrimeNeighborhoods,
                mapping=aes(x=CentroidLongitude, y=CentroidLatitude, label=KeyAbbr),
-               inherit.aes=FALSE, size=1.8) +
+               inherit.aes=FALSE, size=2) +
     scale_fill_gradient(low = "white",high = "steelblue", na.value='grey90', labels=comma) +
     coord_map() +
     theme_void() +
@@ -118,7 +124,7 @@ kable(TopCrimeNeighborhoods %>%
 ) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 ```
 
-```{r, fig.width=10}
+```{r, fig.width=11}
 TopCrimeNeighborhoods <- NeighborhoodDf %>%
   filter(!is.infinite(ArrestsPerCapita)) %>%
   arrange(desc(ArrestsPerCapita)) %>%
@@ -135,7 +141,7 @@ NeighborhoodSDF %>%
     geom_path(color='grey70') +
     geom_label(data=TopCrimeNeighborhoods,
                mapping=aes(x=CentroidLongitude, y=CentroidLatitude, label=KeyAbbr),
-               inherit.aes=FALSE, size=1.8) +
+               inherit.aes=FALSE, size=2) +
     scale_fill_gradient(low = "white",high = "steelblue", na.value='grey90') +
     coord_map() +
     theme_void() +
@@ -149,7 +155,7 @@ industrial/commercial areas with no residential population (according to the cit
 neighborhood shapefile attributes).  However, one industrial area (the Pulaski Industrial Area, labeled with an "X"), does have a very small
 population, and a relatively large number of arrests, producing an arrests/capita value of
 `r TopCrimeNeighborhoods %>% filter(KeyAbbr=='X') %>% .$ArrestsPerCapita`. To avoid having this outlier skew the color scale on the choropleth,
-we have excluded it from the map. The highest-crime neighborhoods, on an arrests/capita basis, are:
+we have excluded it from the shaded areas on the map. The highest-crime neighborhoods, on an arrests/capita basis, are:
 ```{r}
 kable(TopCrimeNeighborhoods %>%
         select(Label=KeyAbbr, Neighborhood=Name, Arrests, Population, `Arrests per Capita`=ArrestsPerCapita) %>%
@@ -283,7 +289,7 @@ The high-density area at the eastern edge of the Downtown neighborhood (and cens
 curious due to the proximity of Baltimore Police Department headquarters (as well as the headquarters for the Central district), indicated
 by the yellow diamond. This area is home to City Hall and the Circuit and District courthouses, and a typical range of downtown
 businesses, such as bars, restaurants, convenience stores, parking lots, and banks. It is plausible that many of the arrests that
-occur in this area occur at the police department facility, or perhaps one of the courthouses, though the alleged crime that led to
+occur in this area occur at the police department facility, or perhaps one of the courthouses, while the alleged crime that led to
 the arrest occurred elsewhere in the city. Unfortunately there is nothing explicit in the dataset that would allow us to discern these
 arrests.
 
@@ -313,7 +319,7 @@ can also give a sense of the seasonal and diurnal variations in criminal activit
 The following visualization shows a "heat map" of the time of day and day of the year, in 2015, with arrests per hour indicated by
 the degree of shading in each hourly cell:
 
-```{r, fig.width=10}
+```{r, fig.width=11}
 Arrests %>% filter(year(ArrestDate)==2015) %>%
   group_by(ArrestDate, ArrestHour) %>%
   summarize(n=n()) %>%
@@ -323,7 +329,7 @@ Arrests %>% filter(year(ArrestDate)==2015) %>%
   geom_tile(aes(x=ArrestDate, y=ArrestHour, fill=n), na.rm=TRUE) +
   scale_fill_gradient(low = "white",high = "steelblue") + scale_y_discrete(limits=0:23) +
   scale_x_date(date_breaks='1 months', date_labels='%b-%e') +
-  theme(axis.ticks.y=element_blank(), panel.background=element_blank()) +
+  theme(axis.ticks.y=element_blank(), panel.background=element_blank(), legend.position='bottom') +
   labs(x=NULL, y=NULL, fill='Arrests/hour', title='Arrests by Time of Day, each day in 2015',
        subtitle='Arrests Made by the Baltimore Police Department')
 
@@ -331,12 +337,13 @@ Arrests %>% filter(year(ArrestDate)==2015) %>%
 A quick glance at this visualization suggests some hypotheses about crime and police response during 2015:
 
 * The civil unrest that followed the Freddie Gray death-in-custody situation in late April 2015 is very apparent
-* Nighttime (and particularly early morning) arrests seem to decline in the winter months, and spike in the warm months of July-August
+* Nighttime (and particularly early morning) arrests seem to decline in the winter months, and increase in the warm months of July-August
 * The 1:00 am hour seems to have a spike in arrests
-* A close look suggests a possible spike in arrests on Halloween
-* There is a noticeable increase in arrests at 9:00 pm on December 15, but a search of Baltimore news on that date suggests no likely cause
+* There are several other cells in the heatmap--notably 9:00 pm on December 15--that have an unusual number of arrests; these could be
+simple random fluctuations or record-keeping anomalies (which seems to be the case on 12/15, since a Google search reveals no
+extraordinary events on that date)
 
-The phenomenon of early morning arrests merits a closer look to examine the associated crime types:
+The phenomenon of early morning arrests (midnight - 2:00 am hours) merits a closer look to examine the associated crime types:
 ```{r, fig.width=8}
 tdf <- Arrests %>% filter(ArrestHour %in% c(0,1,2))
 tdf %>% group_by(Type) %>% summarize(n=n()) %>% mutate(pct=n/sum(n), pcts=percent(pct)) %>%
@@ -356,8 +363,8 @@ the night.
 
 ## Violent Crime
 
-There is considerable variation in where violent crime occurs across the city.  (Here we define "violent crime" as: murder, rape,
-robbery, shooting, and aggravated assault):
+There is considerable variation in where violent crime occurs across the city.  (In alignment with FBI guidance, we define "violent crime"
+as: murder, rape, robbery, shooting, and aggravated assault):
 
 ```{r, fig.width=9}
 CensusBlockSDF %>%
@@ -400,7 +407,8 @@ ggplot(data=zoningSDF, mapping=aes(x=long, y=lat, group=group)) +
 ```
 
 In what follows here, I will focus on the Land Use dataset, since it captures how areas are actually being used, versus how the city
-government has classified or designated land for use.
+government has classified or designated land for use.  Note that the Land Use data are from a study conducted in 2010, though the
+Department of Planning assembled the dataset in 2013.
 
 By merging the land use and census tract shapefiles, and overlaying polygons, we are able to calculate the percentage of each census
 tract's area in each of the land use categories. This in turn allows us to visualize, for example, the extent of residential land
