@@ -9,6 +9,16 @@ library(tidycensus)
 library(memoise)
 library(ggmap)
 
+CallsForService <- read_csv('/opt/data/police-data/baltimore/911_Calls_for_Service.csv') %>%
+  mutate(coords=str_replace_all(location, '\\(|\\)|[ ]', '')) %>%
+  select(-location) %>%
+  separate(coords, c('Latitude', 'Longitude'), sep=',', convert=TRUE, fill='right') %>%
+  filter(!is.na(Latitude)) %>%
+  mutate(callDateTime=parse_date_time(callDateTime, 'mdY H:M:s p', tz='America/New_York')) %>%
+  mutate(CallDate=as_date(callDateTime), CallHour=hour(callDateTime)) %>%
+  rename(CallDateTime=callDateTime) %>%
+  filter(!is.na(CallDateTime))
+
 getPart1Arrests <- function() {
   Part1Incidents <- read_csv('/opt/data/police-data/baltimore/BPD_Part_1_Victim_Based_Crime_Data.csv', col_types=cols()) %>%
     mutate(Neighborhood=case_when(
@@ -62,10 +72,13 @@ getPart1Arrests <- function() {
 
 Arrests <- getPart1Arrests()
 
-minDate <- min(Arrests$ArrestDate)
+minDate <- max(min(Arrests$ArrestDate), min(CallsForService$CallDate))
 minDateS <- format(minDate, '%b %Y')
-maxDate <- max(Arrests$ArrestDate)
+maxDate <- min(max(Arrests$ArrestDate), max(CallsForService$CallDate))
 maxDateS <- format(maxDate, '%b %Y')
+
+Arrests <- Arrests %>% filter(ArrestDate >= minDate) %>% filter(ArrestDate <= maxDate)
+CallsForService <- CallsForService %>% filter(CallDate >= minDate) %>% filter(CallDate <= maxDate)
 
 get_acs_mem <- memoize(get_acs)
 
@@ -112,11 +125,30 @@ ArrestLocations <- SpatialPoints(cbind(Arrests$Longitude, Arrests$Latitude), pro
 Arrests <- Arrests %>% bind_cols(over(ArrestLocations, CensusBlockSPDF) %>%
                                    select(CensusTract=GEOID) %>% mutate_if(is.factor, as.character))
 
+CallsForServiceLocations <- SpatialPoints(cbind(CallsForService$Longitude, CallsForService$Latitude), proj4string=CRS('+proj=longlat')) %>%
+  spTransform(proj4string(CensusBlockSPDF))
+
+CallsForService <- CallsForService %>% bind_cols(over(CallsForServiceLocations, CensusBlockSPDF) %>%
+                                                   select(CensusTract=GEOID) %>% mutate_if(is.factor, as.character))
+
 CensusBlockDf <- CensusBlockDf %>%
   mutate_if(is.factor, as.character) %>%
   inner_join(acsData2015, by='GEOID') %>%
   inner_join(Arrests %>% group_by(CensusTract) %>% summarize(Arrests=n(), ViolentCrimeArrests=sum(ViolentCrime)), by=c('GEOID'='CensusTract')) %>%
-  mutate(ArrestsPerCapita=Arrests/Population, ViolentCrimeArrestsPerCapita=ViolentCrimeArrests/Population)
+  inner_join(CallsForService %>% group_by(CensusTract) %>% summarize(CallsForService=n()), by=c('GEOID'='CensusTract')) %>%
+  mutate(ArrestsPerCapita=Arrests/Population, ViolentCrimeArrestsPerCapita=ViolentCrimeArrests/Population, CallsForServicePerCapita=CallsForService/Population,
+         ArrestsPerCallForService=Arrests/CallsForService)
+
+TractPriorityDf <- CallsForService %>%
+  filter(!is.na(CensusTract)) %>%
+  mutate(UrgentCalls=priority %in% c('Emergency', 'High'), NonUrgentCalls=priority=='Low') %>%
+  select(CensusTract, UrgentCalls, NonUrgentCalls) %>%
+  group_by(CensusTract) %>%
+  summarize_all(sum, na.rm=TRUE) %>%
+  mutate(UrgentCallRatio=UrgentCalls/NonUrgentCalls) %>%
+  select(CensusTract, UrgentCallRatio)
+
+CensusBlockDf <- CensusBlockDf %>% inner_join(TractPriorityDf, by=c('GEOID'='CensusTract'))
 
 landUseSPDF <- readOGR('/opt/data/police-data/baltimore/shapefiles/Baci2013/OVERLAYS/LULC/2010', 'bacilu10', verbose=FALSE) %>%
   spTransform(proj4string(CensusBlockSPDF))
@@ -218,6 +250,16 @@ NeighborhoodSDF <- NeighborhoodSDF %>% inner_join(NeighborhoodDf, by='id')
 Arrests <- Arrests %>% bind_cols(over(ArrestLocations, NeighborhoodSPDF) %>%
                                    select(GeocodedNeighborhood=Name) %>% mutate_if(is.factor, as.character))
 
+CallsForService <- CallsForService %>% bind_cols(over(CallsForServiceLocations, NeighborhoodSPDF) %>%
+                                   select(GeocodedNeighborhood=Name) %>% mutate_if(is.factor, as.character))
+
+NeighborhoodDf <- NeighborhoodDf %>%
+  inner_join(CallsForService %>% group_by(GeocodedNeighborhood) %>% summarize(CallsForService=n()), by=c('Name'='GeocodedNeighborhood')) %>%
+  mutate(CallsForServicePerCapita=CallsForService/Population, ArrestsPerCallForService=Arrests/CallsForService)
+
+NeighborhoodSDF <- NeighborhoodSDF %>%
+  inner_join(NeighborhoodDf %>% select(id, CallsForService, CallsForServicePerCapita, ArrestsPerCallForService), by='id')
+
 TouchingNeighborhoods <- gTouches(NeighborhoodSPDF, byid=TRUE) %>% as_tibble() %>%
   mutate(n1=as.character(as.integer(rownames(.))-1)) %>%
   gather(key='n2', value='value', -n1) %>% filter(value) %>% select(-value) %>%
@@ -235,4 +277,12 @@ DowntownGoogleMap <- get_map(location=c(lon=-76.613, lat=39.285), zoom=15)
 DowntownCensusTract <- CensusBlockDf %>% filter(GEOID=='24510040100')
 DowntownArrests <- Arrests %>% filter(Neighborhood %in% c('Downtown', 'Inner Harbor', 'Downtown West'))
 BPDhq <- tibble(Latitude=39.290219, Longitude=-76.607758)
+
+if (exists('allObjects')) rm(allObjects)
+objectNames <- ls()
+map(objectNames, function(objectName) {
+  get(objectName)
+}) %>%
+  set_names(objectNames) %>%
+  saveRDS('allObjects.rds')
 

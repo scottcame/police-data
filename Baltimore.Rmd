@@ -473,4 +473,3 @@ CensusBlockDf %>% mutate(PercentViolentCrime=ViolentCrimeArrests/Arrests) %>%
   theme_economist() +
   theme(legend.text=element_text(size=10), legend.position='bottom')
 ```
-

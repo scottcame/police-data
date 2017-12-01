@@ -1,0 +1,451 @@
+---
+title: "Arrests and Calls for Service in Baltimore"
+output:
+  html_notebook:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+In an earlier [notebook](Baltimore.nb.html) I examined the nature of arrests in Baltimore, Maryland, by creating
+various visualizations that used the city's [Part I arrests](https://data.baltimorecity.gov/Public-Safety/BPD-Part-1-Victim-Based-Crime-Data/wsfq-mvij) open dataset.
+
+Among the feedback I received on this notebook was a suggestion to use the city's
+[Calls for Service](https://data.baltimorecity.gov/Public-Safety/911-Calls-for-Service/xviu-ezkt) dataset to look at the distribution of 911 calls across the city, as
+well as the relationship between arrests and calls for service. Of particular interest is whether there is a difference, across neighborhoods, in the
+number of arrests that originate from a 911 call versus otherwise (e.g., officers observing potential criminal activity while on patrol).
+
+It is important to note
+that the Part I Arrest and Call for Service datasets are not directly linked.  That is, there is no shared identifier in the datasets that would allow us to associate
+each arrest that originated from a 911 call (via dispatch) with the corresponding Call for Service record.We are, however, able to look at the relationship between
+Calls for Service and Arrests in the aggregate for various geographic areas of the city.  Like the Arrest
+dataset, the Call for Service dataset includes approximate latitude/longitude coordinates for the incident location. This allows us to overlay the calls for service onto
+the city's neighborhood shapefile and the US Census Bureau census tract shapefile, just as we did in the previous notebook analysis. Then we can, for each geographic
+area, compute a ratio of the number of arrests to the number of calls for service to get a sense of the relationship.
+
+It will be key to exercise some caution in interpreting this ratio, since there are many factors that could explain a difference in the ratio across neighborhoods. If
+Neighborhood A sees 3 arrests per hundred 911 calls (somewhat below the city-wide average, as we will see shortly), and Neighborhood B sees 6 arrests per 100 calls, it could be the
+case that the police department is devoting more resources to patrolling Neighborhood B, leading to more officer-observed activity that results in an arrest without an
+underlying service call.  Or it could be that the inhabitants of Neighborhood A are more able, willing, or otherwise likely to report incidents to the city by calling
+911 than the inhabitants of Neighborhood B. Alternatively, the calls for service in Neighborhood A may involve a greater proportion of incidents that tend not to lead to
+arrest, such as traffic accidents, nuisance calls, medical emergencies, and the like. There is not much in the dataset that allows us to tease out these factors, but
+perhaps we can nonetheless gain some useful insights about the nature of crime in Baltimore that can be explored further in future analyses.
+
+```{r echo=FALSE, warning=FALSE}
+library(tidyverse, quietly=TRUE, warn.conflicts=FALSE)
+library(ggplot2, quietly=TRUE, warn.conflicts=FALSE)
+library(ggthemes, quietly=TRUE, warn.conflicts=FALSE)
+library(scales, quietly=TRUE, warn.conflicts=FALSE)
+library(knitr, quietly=TRUE, warn.conflicts=FALSE)
+library(kableExtra, quietly=TRUE, warn.conflicts=FALSE)
+
+if (!exists('allObjects')) allObjects <- readRDS('allObjects.rds')
+CallsForService <- allObjects$CallsForService
+
+```
+
+## Dataset Summary
+
+The Calls for Service dataset that I used in this notebook has `r comma(nrow(CallsForService))` records covering the period
+`r format(min(CallsForService$CallDate), '%m/%d/%Y')` to `r format(max(CallsForService$CallDate), '%m/%d/%Y')`. Each record contains:
+
+* The date and time of the call
+* The priority of the call (`r paste(sort(unique(CallsForService$priority)), sep=',')`)
+* A description of the call (which appears to be quasi-free text)
+* Location information, which includes the district and approximate address and coordinates of the incident
+* A call identifier
+
+I subsetted the raw dataset to cover the same date range as the Part I Arrest dataset used in the prior notebook, and removed any records with missing values
+for call date/time or location coordinates.
+
+For details on how I read in the raw dataset and integrated it with the other data sources used in the notebook, see the
+[`Baltimore-ReadData.R` script](https://github.com/scottcame/police-data/blob/master/Baltimore-ReadData.R) in the GitHub repository.
+
+## Distribution of Calls for Service by Priority
+
+To get an initial feel for the dataset, consider the following bar chart depicting the priority level of calls:
+
+```{r}
+CallsForService %>% group_by(priority) %>% summarize(n=n()) %>% mutate(pct=n/sum(n), pcts=percent(pct)) %>%
+  mutate(priority=ifelse(is.na(priority), '(Missing)', priority)) %>%
+  ggplot() +
+  geom_bar(mapping=aes(x=reorder(priority, n), y=n), stat='identity') + coord_flip() +
+  stat_summary(fun.y = identity, geom="text", aes(x=reorder(priority, n), y=n, label=pcts), hjust = -.25) +
+  scale_y_continuous(labels=comma, limits=c(0,1500000)) +
+  theme_economist() +
+  labs(x='Call Priority', y='Number of Calls', title='Distribution of Calls by Priority',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption=paste0('n=', comma(nrow(CallsForService))))
+```
+Since the city's dataset documentation does not define the rules used to assign these priority labels to calls, it is somewhat difficult
+to interpret the distribution.  As the bar chart indicates, a slight majority of all calls (and by far the largest category) is
+"Medium" priority.
+
+We can also look at the distribution of calls by priority across the city.  In this choropleth map, we have taken the ratio of
+"Emergency" and "High" priority calls, in the numerator, to the number of "Low" priority calls, in the denominator:
+
+```{r, fig.width=11}
+CensusBlockSDF %>%
+  ggplot(mapping=aes(x=long, y=lat, group=group)) +
+    geom_polygon(aes(fill=UrgentCallRatio)) +
+    geom_path(color='grey70') +
+    geom_path(data=CountySDF, color='grey50') +
+    scale_fill_gradient(low = "white",high = "steelblue", na.value='grey90') +
+    coord_map() +
+    theme_void() +
+  theme(legend.title.align=0.5) +
+  labs(fill='Ratio',
+       title='Ratio of "Urgent" to "Non-Urgent" Calls in Each Baltimore Census Tract',
+       caption='Urgent=Emergency or High priority, Non-Urgent=Low priority',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS))
+```
+
+There is considerable variation across Census tracts in the relative proportion of urgent calls, with several areas to the west and east
+of downtown, the Belair area northeast of downtown, and the tract to the southwest of Johns Hopkins University all having more urgent
+than non-urgent calls.  Conversely, along the outer edges of the city, non-urgent calls are relatively more frequent.
+
+## When do Calls for Service Occur?
+
+It's also interesting to examine counts of calls by day of the year and time of day.  To enable comparison to the heat map of arrests in the prior analysis,
+this heat map of calls covers calendar year 2015:
+
+```{r, fig.width=11}
+CallsForService %>% filter(year(CallDate)==2015) %>%
+  group_by(CallDate, CallHour) %>%
+  summarize(n=n()) %>%
+  ungroup() %>%
+  arrange(CallDate, CallHour) %>%
+  ggplot() +
+  geom_tile(aes(x=CallDate, y=CallHour, fill=n), na.rm=TRUE) +
+  scale_fill_gradient(low = "white",high = "steelblue") + scale_y_discrete(limits=0:23) +
+  scale_x_date(date_breaks='1 months', date_labels='%b-%e') +
+  theme(axis.ticks.y=element_blank(), panel.background=element_blank(), legend.position='bottom') +
+  labs(x=NULL, y=NULL, fill='Calls/hour', title='Calls for Service by Time of Day, each day in 2015',
+       subtitle='Baltimore Police Department')
+
+```
+
+As with the arrest count heat map in the prior analysis, the unrest that occurred in the second half of April 2015 is apparent in an increase in calls for
+service. However, there are some interesting differences in calls for service versus arrests:
+
+* There is a distinct pattern to early morning calls (i.e., midnight - 3:00 am) that suggests a weekly (possibly every weekend) rhythm
+* There are distinct periods without any calls for service (indicated by pure white lines in the map); these could be times when the city's data
+collection process (that populates the open dataset) was offline or interrupted for some reason
+* There are noticeable increases in calls on the night of July 4 (quite possibly for citizens calling about violations of the city's ban on fireworks) and
+also, for an hour or so, on Halloween
+
+Taking a closer look at early morning calls, and the distribution of those calls by day of week, confirms a significant increase on weekends:
+
+```{r}
+CallsForService %>%
+  filter(CallHour %in% 0:4) %>%
+  mutate(down=wday(CallDate), dow=as.character(wday(CallDate, label=TRUE, abbr=FALSE))) %>%
+  group_by(down, dow) %>% summarize(n=n()) %>% ungroup() %>% mutate(pct=n/sum(n), pcts=percent(pct)) %>%
+  ggplot() +
+  geom_bar(mapping=aes(x=reorder(dow, -down), y=n), stat='identity') + coord_flip() +
+  stat_summary(fun.y = identity, geom="text", aes(x=reorder(dow, -down), y=n, label=pcts), hjust = -.25) +
+  scale_y_continuous(labels=comma, limits=c(0,75000)) +
+  theme_economist() +
+  labs(x=NULL, y='Number of Calls', title='Distribution of Early Morning Calls by Day of Week',
+       subtitle=paste0('Calls between midnight and 3 am, Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption=paste0('n=', comma(nrow(CallsForService))))
+```
+
+## From Where in the City do Calls Originate?
+
+Unlike the Arrest dataset, the city's Calls for Service dataset does not contain a variable identifying the neighborhood associated with the call.
+However, since each call for service includes approximate coordinates for the related incident, we are able to overlay the city's neighborhood
+shapefile and the Census tract shapefile to get a sense of the geographic distribution of calls.
+
+```{r, fig.width=11}
+TopCallNeighborhoods <- NeighborhoodDf %>%
+  filter(!is.infinite(CallsForServicePerCapita)) %>%
+  arrange(desc(CallsForServicePerCapita)) %>%
+  head(10) %>%
+  bind_cols(tibble(KeyAbbr=c(LETTERS[1:(nrow(.))]))) %>%
+  select(KeyAbbr, Name, CallsForServicePerCapita, CallsForService, Population, CentroidLongitude, CentroidLatitude)
+
+NeighborhoodSDF %>%
+  ggplot(mapping=aes(x=long, y=lat, group=group)) +
+    geom_polygon(aes(fill=CallsForServicePerCapita)) +
+    geom_path(color='grey70') +
+    geom_label(data=TopCallNeighborhoods,
+               mapping=aes(x=CentroidLongitude, y=CentroidLatitude, label=KeyAbbr),
+               inherit.aes=FALSE, size=2) +
+    scale_fill_gradient(low = "white",high = "steelblue", na.value='grey90', trans='log', breaks=c(2,8,32,96)) +
+    coord_map() +
+    theme_void() +
+  theme(legend.key.height=unit(2.5, 'line'), legend.title.align=0.5) +
+  labs(fill='Calls/Capita',
+       title='Calls for Service per Capita in Baltimore Neighborhoods',
+       caption='Note: Neighborhood shading for Calls/Capita value is log-scaled',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS))
+```
+Similar to the distribution of arrests per capita as seen in the prior analysis, calls for service (on a per capita basis) are significantly
+higher in the industrial areas, not because there are significantly more calls in those areas, but because there are fewer residents living there.
+Note that we use a log scale for the color gradient in this choropleth map, to reduce the impact of the outliers on the gradient.
+
+The ten neighborhoods with the highest per-capita calls over this two-and-a-half year period, are:
+
+```{r}
+kable(TopCallNeighborhoods %>%
+        select(Label=KeyAbbr, Neighborhood=Name, CallsForService, Population, `Calls per Capita`=CallsForServicePerCapita) %>%
+        mutate(`Calls per Capita`=comma(`Calls per Capita`), `Calls for Service`=comma(CallsForService), Population=comma(Population)) %>%
+        select(-CallsForService), format='html'
+) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Aggregating calls per capita by Census tract indicates that calls per capita (like arrests per capita) are highest in the downtown area, and slightly
+less so to the immediate west of downtown and in the Pulaski area:
+
+```{r, fig.width=11}
+CensusBlockSDF %>%
+  ggplot(mapping=aes(x=long, y=lat, group=group)) +
+    geom_polygon(aes(fill=CallsForServicePerCapita)) +
+    geom_path(color='grey70') +
+    geom_path(data=CountySDF, color='grey50') +
+    scale_fill_gradient(low = "white",high = "steelblue", na.value='grey90', labels=comma, trans='log', breaks=c(2,4,8,16,32)) +
+    coord_map() +
+    theme_void() +
+  theme(legend.key.height=unit(2.5, 'line'), legend.title.align=0.5) +
+  labs(fill='Calls/Capita',
+       title='Calls for Service per Capita in Each Baltimore Census Tract',
+       caption='Census Tract population is from 2015 5-year American Community Survey (ACS) estimates',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS))
+```
+
+## Do Demographic and Economic Factors Correlate with Call Volume?
+
+Citywide, over the time period covered by this dataset, there were
+`r comma(sum(CensusBlockDf$CallsForService)/sum(CensusBlockDf$Population), nsmall=2, digits=2)` calls for service per capita. It is fair
+to ask whether this citywide average is significantly different across a spectrum of demographic and economic characteristics by area.
+In the following scatterplots, we see that the percentage of Census tract population that is white, the median age,
+and the tract's median household income
+are all negatively correlated with service calls per capita (though the strength of the correlation varies somewhat across these
+explanatory variables).
+
+```{r, fig.width=10}
+ggplot(data=CensusBlockDf %>% filter(CallsForServicePerCapita < 30)) +
+  geom_point(mapping=aes(x=PercentWhite, y=CallsForServicePerCapita), na.rm=TRUE) +
+  geom_smooth(mapping=aes(x=PercentWhite, y=CallsForServicePerCapita), na.rm=TRUE,
+              method='lm', color='red', size=.25, se=FALSE) +
+    scale_x_continuous(labels=percent) +
+  labs(title='Calls for Service per Capita and Race, by Census Tract',
+       x='% of Population that is White', y='Calls for Service per Capita',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption='Census Tract population values are from 2015 5-year American Community Survey (ACS) estimates') +
+  theme_economist()
+
+```
+```{r, fig.width=10}
+ggplot(data=CensusBlockDf %>% filter(CallsForServicePerCapita < 30)) +
+  geom_point(mapping=aes(x=MedianAge, y=CallsForServicePerCapita), na.rm=TRUE) +
+  geom_smooth(mapping=aes(x=MedianAge, y=CallsForServicePerCapita), na.rm=TRUE,
+              method='lm', color='red', size=.25, se=FALSE) +
+  labs(title='Calls for Service per Capita and Age, by Census Tract',
+       x='Median Age', y='Calls for Service per Capita',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption='Census Tract population values are from 2015 5-year American Community Survey (ACS) estimates') +
+  theme_economist()
+
+```
+
+```{r, fig.width=10}
+ggplot(data=CensusBlockDf %>% filter(CallsForServicePerCapita < 30)) +
+  geom_point(mapping=aes(x=MedianHouseholdIncome, y=CallsForServicePerCapita), na.rm=TRUE) +
+  geom_smooth(mapping=aes(x=MedianHouseholdIncome, y=CallsForServicePerCapita), na.rm=TRUE,
+              method='lm', formula=y ~ log(x), color='red', size=.25, se=FALSE) +
+  scale_x_continuous(labels=dollar) +
+  labs(title='Calls for Service per Capita and Income, by Census Tract',
+       x='Median Annual Household Income', y='Calls for Service per Capita',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption='Census Tract population and income values are from 2015 5-year American Community Survey (ACS) estimates') +
+  theme_economist()
+
+```
+
+There is also a correlation between the type of land use, as [classified](http://planning.maryland.gov/OurProducts/downloadFiles.shtml)
+by the state of Maryland (in 2010), with "more residential"
+Census tracts exhibiting a relatively lower frequency of calling for service:
+
+```{r, fig.width=10}
+ggplot(data=CensusBlockDf %>% filter(CallsForServicePerCapita < 30)) +
+  geom_point(mapping=aes(x=ResidentialPercentage, y=CallsForServicePerCapita), na.rm=TRUE) +
+  geom_smooth(mapping=aes(x=ResidentialPercentage, y=CallsForServicePerCapita), na.rm=TRUE,
+              method='lm', color='red', size=.25, se=FALSE) +
+  scale_x_continuous(labels=percent) +
+  labs(title='Calls for Service per Capita and Residential Land Use, by Census Tract',
+       x='% of Census tract classified as residential', y='Calls for Service per Capita',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption='Census Tract population values are from 2015 5-year ACS estimates, land use classification from state of Maryland') +
+  theme_economist()
+
+```
+
+It is worth noting that there is intuitively a high degree of correlation _among_ these explanatory variables.  To tease out the
+partial effects, we run
+a regression model of per-capita Calls for Service on these four variables (taking the log of household income to account for the
+exponential effect of this variable detected in the visualization above):
+
+```{r}
+model <- lm(data=CensusBlockDf,
+   formula=CallsForServicePerCapita ~ log(MedianHouseholdIncome) + ResidentialPercentage + MedianAge + PercentWhite)
+
+model %>%
+  tidy() %>%
+  select(-statistic) %>%
+  mutate(term=case_when(
+    grepl(x=term, pattern='Income') ~ 'log(Median HH Income)',
+    grepl(x=term, pattern='Residential') ~ '% Residential',
+    grepl(x=term, pattern='Age') ~ 'Median Age',
+    grepl(x=term, pattern='White') ~ '% White',
+    TRUE ~ '(Intercept)'
+  )) %>%
+kable(format='html', digits=c(0, 2, 2, 3), col.names=c('Variable', 'Estimate', 'Std Error', 'p(>|t|)')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+In this model, both income and residential land use proportion are negatively correlated with calls per capita,
+and are statistically significant.  Age and race are not statistically significant, suggesting that the effects of these variables
+"wash out" when income and land use are included.
+
+The overall explanatory power of this model is not very high--an R^2^ of
+`r comma(summary(model)$r.squared, digits=3, nsmall=3)` suggests that our model only explains
+`r percent(summary(model)$r.squared)` or the variance in per-capita calls for service across Census tracts.  Still,
+the model provides some evidence that differences in per-capita call volume across the city do vary by income and residential
+land use proportion,
+but not directly by the racial or age makeup of the population.
+
+## The Relationship Between Calls for Service and Arrests
+
+As discussed in the introduction above, we can potentially learn something interesting about crime and policing in Baltimore by
+examining the relationship between arrests and calls for service.  We do so here by computing the ratio of arrests to calls and
+looking at how this ratio varies across Census tracts in the city.
+
+Between `r format(minDate, '%B %d, %Y')` and `r format(maxDate, '%B %d, %Y')`, the city-wide ratio of arrests was
+`r comma(sum(CensusBlockDf$Arrests)/sum(CensusBlockDf$CallsForService), digits=2)`, or 
+`r comma(100*sum(CensusBlockDf$Arrests)/sum(CensusBlockDf$CallsForService), digits=2)` arrests per 100 calls for service. This ratio
+varies somewhat across the city, however:
+
+```{r, fig.width=11}
+CensusBlockSDF %>%
+  mutate(ArrestsPer100CallsForService=100*ArrestsPerCallForService) %>%
+  ggplot(mapping=aes(x=long, y=lat, group=group)) +
+    geom_polygon(aes(fill=ArrestsPer100CallsForService)) +
+    geom_path(color='grey70') +
+    geom_path(data=CountySDF, color='grey50') +
+    scale_fill_gradient(low = "white",high = "steelblue", na.value='grey90') +
+    coord_map() +
+    theme_void() +
+  theme(legend.key.height=unit(2.5, 'line'), legend.title.align=0.5) +
+  labs(fill='Arrests/100 CFS',
+       title='Arrests per Call for Service in Each Baltimore Census Tract',
+       caption='Census Tract population is from 2015 5-year American Community Survey (ACS) estimates',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS))
+```
+
+We can also examine the variation by neighborhood, with the top and bottom five neighborhoods being as follows:
+
+```{r}
+ndf <- bind_rows(
+  NeighborhoodDf %>% filter(Population != 0) %>% top_n(5, ArrestsPerCallForService),
+  NeighborhoodDf %>% filter(Population != 0) %>% top_n(-5, ArrestsPerCallForService)
+) %>% select(Neighborhood=Name, ArrestsPerCallForService, CallsForServicePerCapita, ArrestsPerCapita, Population) %>%
+  mutate(ArrestsPerCallForService=100*ArrestsPerCallForService) %>%
+  arrange(desc(ArrestsPerCallForService))
+kable(ndf %>%
+        mutate(`Calls per Capita`=comma(CallsForServicePerCapita, digits=2, nsmall=2),
+               `Arrests per Capita`=comma(ArrestsPerCapita, digits=2, nsmall=2),
+               `Arrests per 100 CFS`=comma(ArrestsPerCallForService, digits=2, nsmall=2),
+               Population=comma(Population, digits=0)) %>%
+        select(Neighborhood,
+               `Arrests per 100 CFS`,
+               `Arrests per Capita`,
+               `Calls per Capita`,
+               Population), format='html'
+) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+By running a similar regression to the one above, but with Arrests per 100 Calls For Service as the dependent variable this time, we
+can examine the relationships between the ratio and key Census tract characteristics.
+
+```{r}
+model <- lm(data=CensusBlockDf %>%  mutate(ArrestsPerCallForService=100*ArrestsPerCallForService),
+   formula=ArrestsPerCallForService ~ log(MedianHouseholdIncome) + ResidentialPercentage + MedianAge + PercentWhite)
+
+model %>%
+  tidy() %>%
+  select(-statistic) %>%
+  mutate(term=case_when(
+    grepl(x=term, pattern='Income') ~ 'log(Median HH Income)',
+    grepl(x=term, pattern='Residential') ~ '% Residential',
+    grepl(x=term, pattern='Age') ~ 'Median Age',
+    grepl(x=term, pattern='White') ~ '% White',
+    TRUE ~ '(Intercept)'
+  )) %>%
+kable(format='html', digits=c(0, 3, 3, 3), col.names=c('Variable', 'Estimate', 'Std Error', 'p(>|t|)')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Note that the proportion of residential land use is a significant explanatory variable here, as it was in the regression on
+calls per capita.  However, the sign is reversed, suggesting that calls from within Census tracts that have a higher proportion of
+residential land use tend to have a higher ratio of arrests per call, all else being equal. Additionally, as the percentage of a tract's population that
+is white increases, the ratio of arrests to calls increases. Note that neither (log of) median household income
+nor median age is a significant explanatory variable in this regression.
+
+The relationship among these three variables is not quite as apparent on a scatterplot visualization, but still noticeable, with
+larger dots (indicating more arrests per call) in both dimensions away from the origin.
+
+```{r, fig.width=10}
+ggplot(data=CensusBlockDf %>% mutate(ArrestsPerCallForService=100*ArrestsPerCallForService)) +
+  geom_point(mapping=aes(x=ResidentialPercentage, y=PercentWhite, size=ArrestsPerCallForService), na.rm=TRUE) +
+  scale_x_continuous(labels=percent) +
+  scale_y_continuous(labels=percent) +
+  scale_size_continuous(range=c(0, 6)) +
+  labs(title='Race, Land Use, and Arrest-to-Calls Ratio',
+       x='% of Census tract classified as residential', y='% of Population that is White',
+       size='Arrests / 100 CFS:',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS)) +
+  theme_economist()
+
+```
+Finally, we examine whether a higher ratio of "urgent" calls in a Census tract correlates with a higher ratio of arrests per 100
+calls. One might expect such a relationship, based on the reasoning that more urgent calls for service could be for incidents
+(such as robberies, burglaries, shootings, etc.) that tend to involve crimes that, in turn, lead to arrest. The data, however, tell
+a quite different story:
+```{r, fig.width=10}
+ggplot(data=CensusBlockDf %>% mutate(ArrestsPerCallForService=100*ArrestsPerCallForService)) +
+  geom_point(mapping=aes(x=UrgentCallRatio, y=ArrestsPerCallForService), na.rm=TRUE) +
+  labs(title='Arrest-to-Calls Ratio and Call Urgency, by Census Tract',
+       x='Ratio of "Urgent" Calls to "Non-Urgent" Calls', y='Arrests per 100 Calls for Service',
+       subtitle=paste0('Baltimore City, ', minDateS, ' - ', maxDateS),
+       caption='Urgent=Emergency or High priority, Non-Urgent=Low priority') +
+  theme_economist()
+
+```
+A Pearson correlation coefficient of `r comma(cor(CensusBlockDf$ArrestsPerCallForService, CensusBlockDf$UrgentCallRatio), digits=3)`
+here indicates a weak relationship between the variables. One possible explanation might be found in further examination of the nature
+of "urgent" calls. The five most frequently-occurring call descriptions, for "urgent" calls, were:
+
+```{r results='asis'}
+sdf <- CallsForService %>% filter(priority %in% c('Emergency', 'High')) %>%
+  group_by(description) %>% summarize(n=n()) %>% top_n(5, n) %>% arrange(desc(n))
+writeLines(paste('* ', paste(sdf$description, comma(sdf$n), sep=': ')))
+```
+Indeed, many emergency and high-priority calls with these descriptions would not necessarily lead to an arrest. Thus, it is not entirely
+surprising to find a weak relationship between the call urgency ratio and and the arrests-per-100 CFS measure.
+
+## Summary
+
+This analysis of the City of Baltimore's Calls for Service dataset, in conjunction with its Arrest dataset, has not produced any
+ground-breaking conclusions.  However, it does show the potential of open data initiatives to enable analysts to glean interesting
+information from a city's data.  We were able to discern a few not-so-surprising facts from the dataset, including:
+
+* There is significant variation in the volume of service calls across the city, even when accounting for population density
+* High-volume days and times, like July 4 and Halloween, as well as times of civil unrest, are clearly apparent in the data
+* Call volume, normalized by population density, is negatively (and significantly) correlated with both median household income and
+residential classification
+* The ratio of arrests to calls is positively correlated with residential classification and the percentage of an area that is of white race
+
+Kudos to the City of Baltimore for making these datasets available.  Like many cities across the country, including those participating
+in the [Police Data Initiative](https://www.policedatainitiative.org/), Baltimore has made an important commitment to transparency and
+community engagement by publishing rich sets of data on public safety operations.
